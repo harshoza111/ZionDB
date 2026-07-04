@@ -13,6 +13,12 @@ from ziondb.index.similarity import CosineSimilarity
 from ziondb.retrieval.retriever import Retriever
 from ziondb.retrieval.search_request import SearchRequest
 from ziondb.retrieval.search_result import SearchResult
+from ziondb.retrieval.services.query_embedding_service import QueryEmbeddingService
+from ziondb.retrieval.services.vector_search_service import VectorSearchService
+from ziondb.retrieval.services.hydration_service import HydrationService
+from ziondb.retrieval.postprocessing.identity_post_processor import IdentityPostProcessor
+from ziondb.retrieval.executors.dense_search_executor import DenseSearchExecutor
+
 
 
 class Collection:
@@ -84,12 +90,26 @@ class Collection:
         else:
             raise ValueError(f"Unsupported index type: '{self.config.index_type}'")
 
-        # 4. Initialize retriever
-        self.retriever = Retriever(
-            vector_index=self.index,
-            record_provider=self.storage,
+        # 4. Initialize retriever with decoupled retrieval services and SearchExecutor
+        query_embedding_service = QueryEmbeddingService(
             embedding_provider=self.embedding_provider
         )
+        vector_search_service = VectorSearchService(
+            vector_index=self.index
+        )
+        hydration_service = HydrationService(
+            record_provider=self.storage
+        )
+        post_processor = IdentityPostProcessor()
+
+        search_executor = DenseSearchExecutor(
+            query_embedding_service=query_embedding_service,
+            vector_search_service=vector_search_service,
+            hydration_service=hydration_service,
+            post_processor=post_processor
+        )
+
+        self.retriever = Retriever(search_executor=search_executor)
 
         # 5. Initialize chunking pipeline
         self._init_pipeline()
@@ -207,11 +227,18 @@ class Collection:
                     created_at=datetime.now(timezone.utc)
                 )
 
+                # Merge document-level metadata and chunk-level metadata
+                merged_metadata = {}
+                if doc.metadata:
+                    merged_metadata.update(doc.metadata)
+                if chunk.metadata:
+                    merged_metadata.update(chunk.metadata)
+
                 record = ChunkRecord(
                     id=record_id,
                     text=chunk.text,
                     embedding=chunk_emb.embedding,
-                    metadata=chunk.metadata,
+                    metadata=merged_metadata,
                     system_metadata=sys_meta
                 )
 

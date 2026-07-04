@@ -1,9 +1,14 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, TYPE_CHECKING
 import numpy as np
 
 from ziondb.storage.record import ChunkRecord
-from ziondb.index.models import SearchResult
+from ziondb.index.models import IndexSearchResult
+
+if TYPE_CHECKING:
+    from ziondb.retrieval.search_context import SearchContext
+
 
 class VectorIndex(ABC):
     """Abstract interface defining the operations contract for a vector index search engine."""
@@ -39,16 +44,15 @@ class VectorIndex(ABC):
         pass
 
     @abstractmethod
-    def search(self, query_vector: np.ndarray, top_k: int) -> List[SearchResult]:
+    def search(self, context: SearchContext) -> List[IndexSearchResult]:
         """
-        Searches the index for the top-k most similar records relative to the query vector.
+        Searches the index for the most similar records matching the query in search context.
 
         Args:
-            query_vector: The query embedding vector (1D numpy array).
-            top_k: The maximum number of search results to return.
+            context: The SearchContext wrapping query parameters.
 
         Returns:
-            List[SearchResult]: A sorted list of the closest matches.
+            List[IndexSearchResult]: A sorted list of the closest matches.
         """
         pass
 

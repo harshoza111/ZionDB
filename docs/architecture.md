@@ -30,9 +30,15 @@ graph TD
         collection --> persistence[CollectionPersistence]
     end
     
-    retriever --> index
-    retriever --> storage
-    retriever --> embedder[EmbeddingProvider\nONNXEmbeddingProvider]
+    retriever --> executor[SearchExecutor\nDenseSearchExecutor]
+    executor --> q_embed[QueryEmbeddingService]
+    executor --> v_search[VectorSearchService]
+    executor --> hydrate[HydrationService]
+    executor --> post_proc[IdentityPostProcessor]
+    
+    q_embed --> embedder[EmbeddingProvider\nONNXEmbeddingProvider]
+    v_search --> index
+    hydrate --> storage
     pipeline --> embedder
     
     persistence --> config_ser[ConfigSerializer]
@@ -98,23 +104,40 @@ sequenceDiagram
 ```
 
 ### 2. Semantic Search Flow
-This flow illustrates the query path where Retriever translates a search query, queries the vector index, resolves records, and yields clean results:
+This flow illustrates the query path where the Retriever delegates the query to a SearchExecutor (e.g. DenseSearchExecutor), which orchestrates specialized domain services (QueryEmbeddingService, VectorSearchService, HydrationService, and PostProcessor) to resolve search results:
 
 ```mermaid
 sequenceDiagram
     actor Client as User/Client
-    Client->>Collection: search(query, top_k)
+    Client->>Collection: search(query, top_k, metadata_filter, similarity_metric)
     Collection->>Retriever: retrieve(SearchRequest)
-    Retriever->>EmbeddingProvider: embed([query])
-    EmbeddingProvider-->>Retriever: [query_vector]
-    Retriever->>VectorIndex: search(query_vector, top_k)
-    VectorIndex-->>Retriever: list[SearchResult(record_id, score)]
-    loop For each result match
-        Retriever->>Storage: get(record_id)
-        Storage-->>Retriever: ChunkRecord
+    Retriever->>SearchExecutor: execute(SearchRequest)
+    
+    SearchExecutor->>QueryEmbeddingService: embed_and_contextualize(SearchRequest)
+    QueryEmbeddingService->>QueryEmbeddingService: parse_filter(metadata_filter)
+    QueryEmbeddingService->>EmbeddingProvider: embed([query])
+    EmbeddingProvider-->>QueryEmbeddingService: [query_vector]
+    QueryEmbeddingService-->>SearchExecutor: SearchContext
+    
+    SearchExecutor->>VectorSearchService: search(SearchContext)
+    VectorSearchService->>VectorIndex: search(SearchContext)
+    Note over VectorIndex: Evaluates FilterExpression on cached metadata<br/>before computing similarity
+    VectorIndex-->>VectorSearchService: list[IndexSearchResult(record_id, score)]
+    VectorSearchService-->>SearchExecutor: list[IndexSearchResult]
+    
+    SearchExecutor->>HydrationService: hydrate(list[IndexSearchResult])
+    loop For each match
+        HydrationService->>Storage: get(record_id)
+        Storage-->>HydrationService: ChunkRecord
     end
-    Retriever-->>Collection: list[SearchResult(record, score)]
-    Collection-->>Client: list[SearchResult(record, score)]
+    HydrationService-->>SearchExecutor: list[SearchResult]
+    
+    SearchExecutor->>IdentityPostProcessor: process(list[SearchResult])
+    IdentityPostProcessor-->>SearchExecutor: list[SearchResult]
+    
+    SearchExecutor-->>Retriever: list[SearchResult]
+    Retriever-->>Collection: list[SearchResult]
+    Collection-->>Client: list[SearchResult]
 ```
 
 ### 3. Collection Persistence Flow
@@ -165,7 +188,22 @@ sequenceDiagram
 - The main engine driver. Handles document insertions, indexing orchestrations, and forwards queries to the retriever. Owns storage, index, and retriever instances.
 
 ### 8. Retriever (`Retriever`)
-- Orchestrates semantic search queries. Generates query embeddings, searches the vector index, retrieves chunk records, and returns public SearchResult models.
+- A lightweight coordinator of query retrieval. It holds zero business logic and simply delegates the search execution request directly to the configured `SearchExecutor` strategy.
+
+### 8.1. Search Executor (`SearchExecutor` / `DenseSearchExecutor`)
+- Standard interface and implementation representing a retrieval strategy pipeline. `DenseSearchExecutor` implements dense vector similarity search by coordinating `QueryEmbeddingService`, `VectorSearchService`, `HydrationService`, and `PostProcessor`.
+
+### 8.2. Query Embedding Service (`QueryEmbeddingService`)
+- Generates query embedding vectors from query strings, parses dictionary-based metadata filters into `FilterExpression` AST structures, resolves similarity metrics, and packages them into a `SearchContext` execution contract.
+
+### 8.3. Vector Search Service (`VectorSearchService`)
+- Serves as an adapter around the active `VectorIndex`, invoking the `.search()` method with the given `SearchContext` and returning raw `IndexSearchResult` matches.
+
+### 8.4. Hydration Service (`HydrationService`)
+- Takes raw index results containing record IDs and fetches the corresponding full `ChunkRecord` objects from storage, returning a list of public `SearchResult` matches.
+
+### 8.5. Post-Processor (`PostProcessor` / `IdentityPostProcessor`)
+- Standard interface for executing post-retrieval processing (e.g. reranking, score filtering, pagination). `IdentityPostProcessor` is a placeholder that returns results unmodified.
 
 ### 9. CollectionManager & ZionDB (`CollectionManager`, `ZionDB`)
 - Coordinates active collection instances and exposes the primary public database API.

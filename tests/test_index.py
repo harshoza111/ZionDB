@@ -5,9 +5,10 @@ import pytest
 from ziondb.storage.exceptions import RecordNotFoundError
 from ziondb.storage.record import ChunkRecord, SystemMetadata
 from ziondb.storage.in_memory_storage import InMemoryStorage
-from ziondb.index.models import SearchResult
+from ziondb.index.models import IndexSearchResult
 from ziondb.index.similarity import SimilarityMetric, CosineSimilarity
 from ziondb.index.brute_force_index import BruteForceIndex
+from ziondb.retrieval.search_context import SearchContext
 
 @pytest.fixture
 def sample_metadata() -> SystemMetadata:
@@ -37,7 +38,7 @@ def test_index_initial_state(make_record):
     
     assert index.size() == 0
     # Search empty index should return empty
-    results = index.search(np.array([1.0, 0.0]), top_k=5)
+    results = index.search(SearchContext(np.array([1.0, 0.0]), top_k=5))
     assert len(results) == 0
 
 def test_index_insert_and_size(make_record):
@@ -91,7 +92,7 @@ def test_index_rebuild_from_provider(make_record):
     assert index.size() == 2
     
     # Verify both records are indexed
-    results = index.search(np.array([1.0, 0.0]), top_k=5)
+    results = index.search(SearchContext(np.array([1.0, 0.0]), top_k=5))
     assert len(results) == 2
     assert results[0].record_id == "rec_1"
     assert results[1].record_id == "rec_2"
@@ -113,7 +114,7 @@ def test_index_cosine_similarity_search(make_record):
     query = np.array([1.0, 0.0])
     
     # Search for top-2
-    results = index.search(query, top_k=2)
+    results = index.search(SearchContext(query, top_k=2))
     
     assert len(results) == 2
     # Verify ordering (highest cosine similarity first)
@@ -133,10 +134,10 @@ def test_index_search_top_k_bounds(make_record):
     query = np.array([1.0, 1.0])
     
     # Test top_k bounds
-    assert len(index.search(query, top_k=5)) == 5
-    assert len(index.search(query, top_k=20)) == 10
-    assert len(index.search(query, top_k=0)) == 0
-    assert len(index.search(query, top_k=-5)) == 0
+    assert len(index.search(SearchContext(query, top_k=5))) == 5
+    assert len(index.search(SearchContext(query, top_k=20))) == 10
+    assert len(index.search(SearchContext(query, top_k=0))) == 0
+    assert len(index.search(SearchContext(query, top_k=-5))) == 0
 
 def test_index_custom_similarity_metric(make_record):
     """
@@ -164,7 +165,7 @@ def test_index_custom_similarity_metric(make_record):
     
     query = np.array([1.0, 0.0])
     
-    results = index.search(query, top_k=3)
+    results = index.search(SearchContext(query, top_k=3))
     
     # Sorting direction should be ascending (smallest distance first)
     assert len(results) == 3

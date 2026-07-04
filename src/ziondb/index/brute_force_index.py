@@ -1,13 +1,17 @@
+from __future__ import annotations
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import numpy as np
 
 from ziondb.index.vector_index import VectorIndex
-from ziondb.index.models import SearchResult
+from ziondb.index.models import IndexSearchResult
 from ziondb.index.similarity import SimilarityMetric, CosineSimilarity
 from ziondb.storage.record import ChunkRecord
 from ziondb.storage.storage import RecordProvider
 from ziondb.storage.exceptions import RecordNotFoundError
+
+if TYPE_CHECKING:
+    from ziondb.retrieval.search_context import SearchContext
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +35,25 @@ class BruteForceIndex(VectorIndex):
         
         # Primary in-memory index mapping record ID to its vector embedding
         self._id_to_vector: Dict[str, np.ndarray] = {}
+        
+        # In-memory cache mapping record ID to its metadata dictionary for fast filtering
+        self._id_to_metadata: Dict[str, Dict[str, Any]] = {}
 
     def insert(self, record: ChunkRecord) -> None:
         """
-        Inserts a single record's vector representation into the index.
+        Inserts a single record's vector representation and metadata into the index.
 
         Args:
             record: The ChunkRecord to index.
         """
         # Note: If the record is already stored, we overwrite the vector in the index.
         self._id_to_vector[record.id] = record.embedding
-        logger.debug(f"Indexed vector for record '{record.id}' in BruteForceIndex.")
+        self._id_to_metadata[record.id] = record.metadata or {}
+        logger.debug(f"Indexed vector and metadata for record '{record.id}' in BruteForceIndex.")
 
     def remove(self, record_id: str) -> None:
         """
-        Removes a record's vector representation from the index.
+        Removes a record's vector representation and metadata from the index.
 
         Args:
             record_id: The ID of the record to remove.
@@ -57,11 +65,13 @@ class BruteForceIndex(VectorIndex):
             raise RecordNotFoundError(f"Record with ID '{record_id}' not found in the index.")
         
         del self._id_to_vector[record_id]
-        logger.debug(f"Removed record '{record_id}' vector from BruteForceIndex.")
+        if record_id in self._id_to_metadata:
+            del self._id_to_metadata[record_id]
+        logger.debug(f"Removed record '{record_id}' from BruteForceIndex.")
 
     def update(self, record: ChunkRecord) -> None:
         """
-        Updates an existing record's vector representation in the index.
+        Updates an existing record's vector representation and metadata in the index.
 
         Args:
             record: The updated ChunkRecord.
@@ -73,45 +83,57 @@ class BruteForceIndex(VectorIndex):
             raise RecordNotFoundError(f"Record with ID '{record.id}' not found in the index.")
 
         self._id_to_vector[record.id] = record.embedding
-        logger.debug(f"Updated vector for record '{record.id}' in BruteForceIndex.")
+        self._id_to_metadata[record.id] = record.metadata or {}
+        logger.debug(f"Updated vector and metadata for record '{record.id}' in BruteForceIndex.")
 
-    def search(self, query_vector: np.ndarray, top_k: int) -> List[SearchResult]:
+    def search(self, context: SearchContext) -> List[IndexSearchResult]:
         """
-        Searches the index for the top-k most similar records relative to the query vector.
+        Searches the index for similar vectors, applying metadata filtering before similarity computation.
 
         Args:
-            query_vector: The query embedding vector (1D numpy array).
-            top_k: The maximum number of search results to return.
+            context: The SearchContext wrapping query parameters.
 
         Returns:
-            List[SearchResult]: A sorted list of the closest matches, ordered from best to worst.
+            List[IndexSearchResult]: A sorted list of the closest matches, ordered from best to worst.
         """
-        if top_k <= 0 or not self._id_to_vector:
+        if context.top_k <= 0 or not self._id_to_vector:
             return []
 
-        results: List[SearchResult] = []
+        # Use overridden similarity metric if provided in the context, otherwise index default
+        metric = context.similarity_metric if context.similarity_metric is not None else self.metric
+        filter_expr = context.filter_expression
 
-        # Iterate over every indexed vector and compute similarity score
+        results: List[IndexSearchResult] = []
+
+        # Iterate over every indexed vector and compute similarity score if filter passes
         for record_id, vector in self._id_to_vector.items():
-            score = self.metric.calculate(query_vector, vector)
-            results.append(SearchResult(record_id=record_id, score=score))
+            # Evaluate metadata filter expression before similarity calculation
+            if filter_expr is not None:
+                record_metadata = self._id_to_metadata.get(record_id, {})
+                if not filter_expr.evaluate(record_metadata):
+                    continue
+
+            score = metric.calculate(context.query_vector, vector)
+            results.append(IndexSearchResult(record_id=record_id, score=score))
 
         # Sort based on metric direction (highest score first for cosine/dot product, lowest first for distance)
         sorted_results = sorted(
             results,
             key=lambda x: x.score,
-            reverse=self.metric.greater_is_better
+            reverse=metric.greater_is_better
         )
 
-        return sorted_results[:top_k]
+        return sorted_results[:context.top_k]
 
     def rebuild(self) -> None:
         """Completely rebuilds the index from the underlying storage provider."""
         logger.info("Rebuilding BruteForceIndex from the underlying RecordProvider...")
         self._id_to_vector.clear()
+        self._id_to_metadata.clear()
         
         for record in self.record_provider.iterate():
             self._id_to_vector[record.id] = record.embedding
+            self._id_to_metadata[record.id] = record.metadata or {}
 
         logger.info(f"Rebuild finished. Indexed {len(self._id_to_vector)} vectors.")
 

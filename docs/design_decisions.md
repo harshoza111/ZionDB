@@ -102,5 +102,47 @@ This document explains the major architectural choices made during the bootstrap
   - **Serialization Performance**: Embeddings are written directly as raw IEEE-754 `float32` bytes (not text/JSON), avoiding parsing/string conversion overhead and keeping file sizes small.
   - **Backward Compatibility**: A magic byte header (`b'ZION'`) and a file format version (`uint16`) ensure we can support file migrations in future releases.
 
+---
+
+## 10. Retrieval Architecture Refactoring (Phase 1)
+
+* **Decision**: Decouple query parameters from internal execution using `SearchContext`, introduce a structured `FilterExpression` AST for logical/comparison metadata filters, and delegate filtering strategy to `VectorIndex` implementations.
+* **Rationale**:
+  - **SearchRequest (Public API) vs SearchContext (Internal Execution)**: `SearchRequest` represents what the user asked for (query string, top_k, raw dict filters). `SearchContext` contains what the retrieval engine actually needs to execute the search (pre-computed vector embeddings, parsed `FilterExpression` AST, resolved metric overrides). This separation keeps embedding generation and AST translation isolated in the `Retriever` layer, ensuring future parameters (like candidate IDs, search planning overrides, timeouts) can be added to `SearchContext` without changing the public-facing API.
+  - **FilterExpression AST**: Representing metadata filters as an abstract syntax tree (`EqualFilter`, `AndFilter`, `OrFilter`, `NotFilter`) rather than raw dictionaries allows complex boolean logic (AND, OR, NOT nested recursively) and comparison operations to be evaluated in a type-safe, extensible structure.
+  - **Index-Side Metadata Filtering**:
+    - Conceptually, metadata filtering must happen *before* or *during* similarity computation to avoid return set depletion (which happens if vector similarity is run first and results are filtered post-search).
+    - However, how metadata is stored and evaluated differs drastically across index layouts. For example, `BruteForceIndex` maintains an in-memory metadata cache and does simple O(1) checks. A future `HNSWIndex` might check filters during graph traversal (single-stage payload-aware traversal) or use separate bitmap/metadata indices to pre-select entry points.
+    - Thus, the Retriever must NOT own filtering logic. It passes the `FilterExpression` inside the `SearchContext` to the `VectorIndex`, allowing each index implementation to optimize and execute filters natively.
+  - **Future Preparedness**: This architecture establishes direct extension points:
+    - **HNSW / BM25**: Future vector/keyword search indices can expose the same `search(context: SearchContext)` signature, accepting filters and applying them custom-tailored to their storage layouts.
+    - **Hybrid Search**: Result fusion (like RRF) can merge separate candidate streams produced by indices using the same context.
+    - **Reranking**: An optional reranking stage can easily intercept the hydrated results list after the index search completes.
+
+---
+
+## 11. Retrieval Pipeline Refactoring (Phase 2)
+
+* **Decision**: Decompose the `Retriever` into Query Embedding, Vector Search, Hydration services, and a PostProcessor interface, avoiding a generic pipeline framework.
+* **Rationale**:
+  - **Single Responsibility Principle (SRP)**: The `Retriever` is now a pure orchestrator containing no business logic. The retrieval lifecycle stages are cleanly separated:
+    - `QueryEmbeddingService`: Pre-processing (embedding and context building).
+    - `VectorSearchService`: Index interaction.
+    - `HydrationService`: Storage interaction.
+    - `PostProcessor`: Post-search result mutation (initially `IdentityPostProcessor`).
+  - **Avoiding Framework Bloat**: We intentionally rejected building a generic pipeline runner or stage graph framework. Such frameworks add unnecessary layers of abstraction, are hard to debug, and make the code less readable for learning and research. Hardcoded, domain-specific service references inside a dedicated coordinator (`Retriever`) are highly transparent, self-documenting, and maintain strong compiler/IDE typing checks.
+  - **Future Extensibility**:
+    - **HNSW / BM25**: Future vector indexes can plug directly into the `VectorSearchService` or subclass it (e.g. `HybridSearchService`), query multiple index layouts, and merge results before returning them to `Retriever`.
+    - **Reranking, Pagination, Thresholding**: These future stages fit naturally as custom `PostProcessor` implementations (e.g. `RerankingPostProcessor`) without changing the `Retriever`'s core orchestrating pipeline.
+
+---
+
+## 12. SearchExecutor Abstraction (Phase 3)
+
+* **Decision**: Introduce a `SearchExecutor` interface and move the retrieval execution logic out of the `Retriever` and into the concrete `DenseSearchExecutor`.
+* **Rationale**:
+  - **Strategy Pattern / Open-Closed Principle**: The `Retriever` class is now completely decoupled from specific retrieval workflows. By depending only on the abstract `SearchExecutor` interface, the `Retriever` class does not change when we introduce alternative retrieval strategies (e.g., hybrid dense/sparse search, multi-stage retrieval, or query routing).
+  - **DenseSearchExecutor**: Encapsulates the standard dense vector similarity search pipeline. It coordinates the pre-retrieval embedding and parsing services, queries the vector index, hydrates the matching candidate records from storage, and applies any post-retrieval processing steps.
+  - **Extensibility**: Adding new retrieval strategies like hybrid search will simply involve implementing a `HybridSearchExecutor` (which executes both vector and keyword queries, fuses their outputs, hydrates matches, and optionally reranks them) and injecting it into the `Retriever` constructor.
 
 
