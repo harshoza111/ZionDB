@@ -1,0 +1,24 @@
+pipeline:
+  # Model settings
+  model:
+    name: "sentence-transformers/all-MiniLM-L6-v2"
+    cache_dir: "models"
+    max_length: 256
+
+  # Sentence Splitter settings
+  # splitter.type options: "regex", "spacy"
+  splitter:
+    type: "spacy"
+    model_name: "en_sentencizer"  # Or "en_core_web_sm" (downloads if not present)
+    regex_pattern: "(?<!\\w\\.\\w.)(?<![A-Z][a-z]\\.)(?<=\\.|\\?|\\!)\\s+"
+
+  # Boundary Detector (Kamradt Semantic Chunking) settings
+  boundary_detector:
+    buffer_size: 1
+    # threshold_type options: "percentile", "standard_deviation"
+    threshold_type: "percentile"
+    threshold_value: 95.0
+    # use_text_embedding:
+    #   true: concatenate sentences as text and embed (official Kamradt method)
+    #   false: average sentence vectors mathematically (high performance option)
+    use_text_embedding: true
