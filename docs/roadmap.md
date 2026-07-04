@@ -4,7 +4,7 @@ This document outlines the milestones and roadmap for future iterations of ZionD
 
 ---
 
-## Completed: Version 1 (Core Indexing Pipeline & Storage Base)
+## Completed: Version 1 (Core Indexing, Storage & Indexing Base, Collections & Public API)
 - [x] Interface-driven modular pipeline.
 - [x] Standard `@dataclass(slots=True)` models.
 - [x] HF download and CPU-optimized ONNX model management (no PyTorch).
@@ -12,17 +12,28 @@ This document outlines the milestones and roadmap for future iterations of ZionD
 - [x] Greg Kamradt's semantic similarity boundary detection.
 - [x] YAML pipeline configuration.
 - [x] Storage Interface and high-performance InMemoryStorage driver.
+- [x] RecordProvider read-only interface abstraction.
+- [x] Similarity metric abstraction and baseline BruteForceIndex driver.
+- [x] Collection management layer and named Collections partition.
+- [x] Retriever orchestrator mapping queries to index results and storage records.
+- [x] Public-facing `ZionDB` API entry point.
+- [x] Versioned binary record serializer (`records.bin`) using Length-Value layout.
+- [x] Human-readable YAML configuration serializer (`config.yaml`).
+- [x] Dynamic IndexSerializer interfaces and registry.
+- [x] CollectionPersistence save/load orchestrator.
+- [x] Collection API save and load integration.
 
 ---
 
 ## Upcoming Milestones
 
-### Version 2: Local Persistence & Retrieval
-* **Objective**: Save/load indexes to disk and perform exact searches.
+### Version 2: Alternative Storage Drivers & SQLite
+* **Objective**: Introduce SQLite/Disk-backed storage drivers for scalable database operations.
 * **Scope**:
-  - Implement SQLite/Disk storage driver (SQLiteStorage / DiskStorage).
-  - Implement exact nearest neighbor search (brute-force flat L2 / cosine distance search).
-  - Write index load/save APIs.
+  - Implement SQLite/Disk storage driver (`SQLiteStorage`).
+  - Implement `SQLiteRecordSerializer` mapping records to database rows.
+
+
 
 ### Version 3: Approximate Nearest Neighbors (ANN) Indexing
 * **Objective**: Scale lookup queries to sub-linear time.

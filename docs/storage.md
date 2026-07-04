@@ -74,18 +74,28 @@ To maintain strict $O(1)$ deletion complexity and keep data structures in sync, 
 
 ---
 
+## Storage Persistence & Serialization
+
+In line with ZionDB's design principles, storage implementations contain **no binary serialization or disk-writing code**. They function strictly as in-memory databases.
+
+- **`RecordSerializer`**: The persistence layer class responsible for serializing active storage `ChunkRecord` objects. It writes a structured little-endian binary stream (`records.bin`) using a Length-Value format for string variables, writing embedding arrays directly as raw float32 bytes for low latency.
+- **Loading Flow**: During collection restoration, `CollectionPersistence` leverages `RecordSerializer` to read chunk records, inserts them back sequentially into storage via `Storage.insert()`, and triggers index rebuilds.
+
+---
+
 ## Future Compatibility
 
 The Storage abstract base class interface makes it straightforward to extend ZionDB without changing pipeline or query code:
 
-### 1. SQLite Persistence (`SQLiteStorage`)
-A future driver can implement the `Storage` interface by writing `ChunkRecord` text and metadata to an SQLite database, and storing serialized 384-dimensional float arrays (as BLOBs or JSON strings).
+### 1. SQLite Storage Driver (`SQLiteStorage`)
+A future driver can implement the `Storage` interface by writing `ChunkRecord` text and metadata to an SQLite database, storing the 384-dimensional float arrays in SQL binary BLOB format.
 
 ### 2. Disk Storage (`DiskStorage`)
-For larger datasets, a disk-based storage driver can serialize records to binary files (e.g. Protocol Buffers, MessagePack, or custom binary layout) and maintain index mappings on disk using a B-Tree structure.
+For larger-than-memory datasets, a disk-based storage driver can serialize records directly and maintain index mappings on disk using a B-Tree structure.
 
 ### 3. HNSW and IVF Indexes
-Future indexing algorithms (like Hierarchical Navigable Small World graphs or Inverted File partitioning) will wrap or subscribe to Storage insertion/deletion events to construct and update query acceleration graphs asynchronously.
+Future indexing algorithms (like Hierarchical Navigable Small World graphs or Inverted File partitioning) will subscribe to Storage insertion/deletion events to construct and prune query acceleration graphs asynchronously.
 
 ### 4. Product Quantization (PQ)
 Storage drivers can integrate compression back-ends to store codebooks and quantized vector representations, saving significant memory as index size scales.
+

@@ -2,21 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Iterator
 from ziondb.storage.record import ChunkRecord
 
-class Storage(ABC):
-    """Abstract interface defining the operations contract for a ZionDB storage driver."""
-
-    @abstractmethod
-    def insert(self, record: ChunkRecord) -> None:
-        """
-        Inserts a new record into storage.
-
-        Args:
-            record: The ChunkRecord to store.
-
-        Raises:
-            RecordAlreadyExistsError: If a record with the same ID already exists.
-        """
-        pass
+class RecordProvider(ABC):
+    """Abstract read-only interface for retrieving records from storage."""
 
     @abstractmethod
     def get(self, record_id: str) -> ChunkRecord:
@@ -30,7 +17,57 @@ class Storage(ABC):
             ChunkRecord: The stored record.
 
         Raises:
-            RecordNotFoundError: If the ID does not exist in storage.
+            RecordNotFoundError: If the ID does not exist.
+        """
+        pass
+
+    @abstractmethod
+    def exists(self, record_id: str) -> bool:
+        """
+        Checks if a record with the specified ID exists.
+
+        Args:
+            record_id: The ID to check.
+
+        Returns:
+            bool: True if it exists, False otherwise.
+        """
+        pass
+
+    @abstractmethod
+    def iterate(self) -> Iterator[ChunkRecord]:
+        """
+        Returns an iterator over all stored records.
+
+        Returns:
+            Iterator[ChunkRecord]: An iterator yielding ChunkRecords.
+        """
+        pass
+
+    @abstractmethod
+    def size(self) -> int:
+        """
+        Returns the total number of records currently stored.
+
+        Returns:
+            int: The record count.
+        """
+        pass
+
+
+class Storage(RecordProvider, ABC):
+    """Abstract interface defining the operations contract for a ZionDB storage driver (read-write)."""
+
+    @abstractmethod
+    def insert(self, record: ChunkRecord) -> None:
+        """
+        Inserts a new record into storage.
+
+        Args:
+            record: The ChunkRecord to store.
+
+        Raises:
+            RecordAlreadyExistsError: If a record with the same ID already exists.
         """
         pass
 
@@ -61,39 +98,6 @@ class Storage(ABC):
         pass
 
     @abstractmethod
-    def exists(self, record_id: str) -> bool:
-        """
-        Checks if a record with the specified ID exists in storage.
-
-        Args:
-            record_id: The ID to check.
-
-        Returns:
-            bool: True if it exists, False otherwise.
-        """
-        pass
-
-    @abstractmethod
-    def iterate(self) -> Iterator[ChunkRecord]:
-        """
-        Returns an iterator over all stored records.
-
-        Returns:
-            Iterator[ChunkRecord]: An iterator yielding ChunkRecords.
-        """
-        pass
-
-    @abstractmethod
     def clear(self) -> None:
         """Removes all records from storage."""
-        pass
-
-    @abstractmethod
-    def size(self) -> int:
-        """
-        Returns the total number of records currently stored.
-
-        Returns:
-            int: The record count.
-        """
         pass
