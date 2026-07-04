@@ -4,24 +4,24 @@ This document outlines the milestones and roadmap for future iterations of ZionD
 
 ---
 
-## Completed: Version 1 (Core Indexing Pipeline)
+## Completed: Version 1 (Core Indexing Pipeline & Storage Base)
 - [x] Interface-driven modular pipeline.
 - [x] Standard `@dataclass(slots=True)` models.
 - [x] HF download and CPU-optimized ONNX model management (no PyTorch).
 - [x] Blank spaCy `sentencizer` sentence splitting.
 - [x] Greg Kamradt's semantic similarity boundary detection.
 - [x] YAML pipeline configuration.
+- [x] Storage Interface and high-performance InMemoryStorage driver.
 
 ---
 
 ## Upcoming Milestones
 
-### Version 2: Local Persistence & Storage
-* **Objective**: Save and load vector indexes to/from disk.
+### Version 2: Local Persistence & Retrieval
+* **Objective**: Save/load indexes to disk and perform exact searches.
 * **Scope**:
-  - Implement a lightweight storage manager.
-  - Support flat vector storage (numpy array dump) with serialized metadata mapping.
-  - Implement exact nearest neighbor search (flat L2 / dot product search).
+  - Implement SQLite/Disk storage driver (SQLiteStorage / DiskStorage).
+  - Implement exact nearest neighbor search (brute-force flat L2 / cosine distance search).
   - Write index load/save APIs.
 
 ### Version 3: Approximate Nearest Neighbors (ANN) Indexing
